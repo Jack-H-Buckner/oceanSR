@@ -1,0 +1,20 @@
+# Conda/mamba environment for OCEANSR (recommended path for the geospatial stack).
+#   mamba env create -f environment.yml      # or: conda env create -f environment.yml
+#   conda activate oceansr
+name: oceansr
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - earthaccess>=0.11
+  - rioxarray>=0.15
+  - rasterio>=1.3
+  - xarray>=2024.1
+  - netcdf4>=1.6
+  - shapely>=2.0
+  - pyproj>=3.6
+  - numpy>=1.24
+  - pandas>=2.0
+  - pyyaml>=6.0
+  - dask            # handy for chunked reads later
+  - pip             # keep pip available inside the env

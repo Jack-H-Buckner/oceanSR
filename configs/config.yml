@@ -1,0 +1,76 @@
+# ============================================================================
+# OCEANSR — common project config
+# ----------------------------------------------------------------------------
+# Shared settings (AOIs, grid, dates, paths) live at the top level and are used
+# by every data stream. Source-specific settings live under `sources.<name>`.
+# Each acquisition script reads this one file:
+#     python src/acquire_ecostress.py --config configs/config.yaml --source ecostress
+# Run scripts from the OCEANSR project root so the relative paths resolve.
+# ============================================================================
+
+project:
+  name: OCEANSR
+  root: "."                 # project root; paths below resolve relative to it
+
+paths:
+  data: data
+  results: results
+  # data sub-directory per source (under paths.data)
+  ecostress: ECOSTRESS
+  landsat: LANDSAT
+  mur: MUR
+  training: TRAINING
+
+earthdata:
+  # Auth handled by `earthaccess`. Recommended: ~/.netrc with
+  #   machine urs.earthdata.nasa.gov login <user> password <pass>
+  # Alternatives: "environment" (EARTHDATA_USERNAME/PASSWORD), "interactive".
+  auth_strategy: netrc
+
+# --- Shared across ALL data streams -----------------------------------------
+time:
+  start_date: "2023-08-01"   # inclusive (UTC)
+  end_date:   "2023-08-31"   # inclusive (UTC)
+
+grid:
+  resolution_m: 100          # target posting in metres
+  target_crs: auto           # "auto" -> local UTM per AOI, or e.g. "EPSG:32610"
+  resampling_continuous: bilinear
+  resampling_categorical: nearest
+  snap_origin: true
+  to_celsius: false          # false -> keep temperatures in Kelvin
+
+# AOIs are defined ONCE here and reused by every source.
+# Each: id, name, geometry (bbox [W,S,E,N] in lon/lat OR geojson path), buffer_m.
+aois:
+  - id: hood_canal
+    name: "Hood Canal, WA"
+    bbox: [-123.15, 47.35, -122.85, 47.75]
+    buffer_m: 2000
+  # - id: glacier_bay
+  #   name: "Glacier Bay, AK"
+  #   # geometry: configs/aois/glacier_bay.geojson   # alternative to bbox
+  #   bbox: [-136.55, 58.40, -135.75, 59.10]
+  #   buffer_m: 2000
+
+# --- Per-source settings -----------------------------------------------------
+sources:
+  ecostress:
+    short_name: ECO_L2T_LSTE
+    version: "003"            # V3 = first version with the SST layer
+    layers:                   # role -> COG asset suffix (..._<suffix>.tif)
+      sst: SST                # sea-surface temperature (Kelvin), water-only
+      lst: LST                # land-surface temperature (Kelvin), backup
+      cloud: cloud            # binary cloud mask (1 = cloud)
+      water: water            # binary water mask (1 = water, 0 = land)
+      quality: QC             # bit-packed quality flags
+    categorical: [cloud, water, quality]   # nearest-neighbour on reprojection
+    output_format: netcdf     # netcdf | geotiff
+    overwrite: false
+    # Optional per-source overrides of the shared blocks:
+    # time: {start_date: "2023-07-01", end_date: "2023-07-31"}
+    # grid: {resolution_m: 70}
+
+  # Placeholders for later stages (not yet implemented):
+  # landsat: { short_name: ..., version: ..., layers: {...} }
+  # mur:     { short_name: "MUR-JPL-L4-GLOB-v4.1", ... }

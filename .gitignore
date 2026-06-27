@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+env/
+.ipynb_checkpoints/
+
+# Conda env (if created inside the repo)
+/envs/
+
+# Data + results (large / regenerated; keep the folders via .gitkeep if you like)
+data/
+results/
+
+# Credentials — never commit
+.netrc
+*.env
