@@ -4,10 +4,14 @@ OCEANSR — ECOSTRESS L2T LSTE (V3) acquisition.
 
 Reads the common project config (configs/config.yaml): AOIs, grid, dates and
 paths are shared; ECOSTRESS-specific settings come from `sources.ecostress`.
-For each AOI it searches ECO_L2T_LSTE V3 by bbox + dates, downloads the SST +
-cloud/water/QC COGs, clips them to the AOI polygon, reprojects onto the AOI grid
-at the configured resolution, and writes one aligned file per overpass into
-data/ECOSTRESS/aligned/. A later stage bins these to a daily datacube.
+For each AOI it searches ECO_L2T_LSTE by bbox + dates, then for every overpass
+*streams a windowed read* of the SST + cloud/water/QC COGs (HTTP range requests
+via earthaccess.open -- no full-tile download to disk), reprojects the AOI window
+onto the AOI grid, clips to the AOI polygon, and writes one aligned file per
+overpass into data/ECOSTRESS/aligned/. A later stage bins these to a daily cube.
+
+Because only the AOI window is read and only the small aligned outputs are kept,
+there is no multi-GB raw tile cache.
 
 Usage (run from the OCEANSR project root):
     python src/acquire_ecostress.py --config configs/config.yaml
@@ -22,6 +26,7 @@ import argparse
 import json
 import logging
 import math
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -75,8 +80,7 @@ def build_effective(cfg: dict, source: str) -> dict:
         "time": time_cfg,
         "grid": grid_cfg,
         "ds": src_cfg,
-        "raw_dir": src_dir / "raw",
-        "out_dir": src_dir / "aligned",
+        "out_dir": src_dir / "aligned",   # streamed reads -> no raw tile cache
         "fmt": src_cfg.get("output_format", "netcdf"),
         "overwrite": src_cfg.get("overwrite", False),
     }
@@ -188,30 +192,43 @@ def parse_acq_time(filename: str) -> Optional[datetime]:
 # --------------------------------------------------------------------------- #
 # Per-granule processing
 # --------------------------------------------------------------------------- #
-def reproject_layer(path, target_crs, transform, width, height, resampling):
-    da = rioxarray.open_rasterio(path, masked=True)
+def read_window_reproject(fobj, geom_target, target_crs, transform, width,
+                          height, resampling):
+    """Open a remote COG, read ONLY the AOI window, reproject to the AOI grid.
+
+    `fobj` is an fsspec file object from earthaccess.open(); rioxarray reads it
+    lazily, so clip_box triggers HTTP range reads of just the windowed blocks
+    rather than pulling the whole 110 km tile.
+    """
+    da = rioxarray.open_rasterio(fobj, masked=True)
     if "band" in da.dims:
         da = da.squeeze("band", drop=True)
+    cog_crs = da.rio.crs
+    # AOI bounds expressed in the COG's CRS, padded a few pixels for clean edges.
+    to_cog = Transformer.from_crs(target_crs, cog_crs, always_xy=True).transform
+    minx, miny, maxx, maxy = shp_transform(to_cog, geom_target).bounds
+    pad = 600.0  # ~6 pixels of slack (COG units are metres)
+    da = da.rio.clip_box(minx - pad, miny - pad, maxx + pad, maxy + pad, crs=cog_crs)
     return da.rio.reproject(
         dst_crs=target_crs, shape=(height, width), transform=transform,
         resampling=resampling, nodata=np.nan,
     )
 
 
-def process_granule(role_to_path, ds_cfg, grid_cfg, target_crs, transform,
-                    width, height, geom_proj, aoi_id) -> Optional[xr.Dataset]:
+def process_granule(role_to_file, ds_cfg, grid_cfg, target_crs, transform,
+                    width, height, geom_proj, aoi_id, acq_time) -> Optional[xr.Dataset]:
     categorical = set(ds_cfg.get("categorical", []))
     rs_cont = Resampling[grid_cfg.get("resampling_continuous", "bilinear")]
     rs_cat = Resampling[grid_cfg.get("resampling_categorical", "nearest")]
 
-    data_vars, acq_time = {}, None
-    for role, path in role_to_path.items():
-        acq_time = acq_time or parse_acq_time(Path(path).name)
+    data_vars = {}
+    for role, fobj in role_to_file.items():
         resampling = rs_cat if ds_cfg["layers"][role] in categorical else rs_cont
         try:
-            da = reproject_layer(path, target_crs, transform, width, height, resampling)
+            da = read_window_reproject(fobj, geom_proj, target_crs, transform,
+                                       width, height, resampling)
             da = da.rio.clip([geom_proj], target_crs, drop=False)
-        except Exception as exc:
+        except Exception as exc:  # window outside this tile, etc.
             log.warning("    skipping layer %s (%s)", role, exc)
             continue
         data_vars[role] = da
@@ -269,7 +286,7 @@ def write_output(ds: xr.Dataset, out_dir: Path, aoi_id: str, fmt: str):
 # --------------------------------------------------------------------------- #
 def run(eff: dict, only_aoi, dry_run, list_layers):
     ds_cfg, grid_cfg = eff["ds"], eff["grid"]
-    raw_dir, out_root = eff["raw_dir"], eff["out_dir"]
+    out_root = eff["out_dir"]
     fmt, overwrite = eff["fmt"], eff["overwrite"]
 
     login(eff["earthdata"]["auth_strategy"])
@@ -308,9 +325,7 @@ def run(eff: dict, only_aoi, dry_run, list_layers):
             log.info("  [dry-run] would process %d granule(s)", len(granules))
             continue
 
-        aoi_raw = raw_dir / aoi_id
         aoi_out = out_root / aoi_id
-        aoi_raw.mkdir(parents=True, exist_ok=True)
 
         for gi, granule in enumerate(granules, 1):
             role_to_url = filter_links_for_granule(granule, layers)
@@ -322,13 +337,17 @@ def run(eff: dict, only_aoi, dry_run, list_layers):
                 log.info("  [%d/%d] %s already processed, skipping", gi, len(granules), tstr)
                 continue
 
-            log.info("  [%d/%d] downloading %d layer(s) for %s",
+            log.info("  [%d/%d] streaming %d layer(s) for %s",
                      gi, len(granules), len(role_to_url), tstr)
-            local = earthaccess.download(list(role_to_url.values()), str(aoi_raw))
-            role_to_path = dict(zip(role_to_url.keys(), local))
+            try:
+                fobjs = earthaccess.open(list(role_to_url.values()))
+            except Exception as exc:
+                log.warning("    open failed (%s); skipping", exc)
+                continue
+            role_to_file = dict(zip(role_to_url.keys(), fobjs))
 
-            ds = process_granule(role_to_path, ds_cfg, grid_cfg, target_crs,
-                                  transform, width, height, geom_proj, aoi_id)
+            ds = process_granule(role_to_file, ds_cfg, grid_cfg, target_crs,
+                                 transform, width, height, geom_proj, aoi_id, t)
             if ds is None:
                 continue
             log.info("      wrote %s", write_output(ds, aoi_out, aoi_id, fmt))
@@ -350,6 +369,11 @@ def main():
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+
+    # Make GDAL/curl efficient for remote COG range reads.
+    os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+    os.environ.setdefault("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES", "YES")
+    os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif")
 
     cfg = load_config(args.config)
     eff = build_effective(cfg, args.source)

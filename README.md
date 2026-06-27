@@ -6,9 +6,29 @@ The model combines three primary data sets, Landsat and ECOSTRESS thermal images
 
 Finally, the fine tuning with the in situ measurements will help correct for skin-bulk sst differnces and biases included in the SST retrival algorithms for each instrument. 
 
+OCEANSR/
+├── configs/
+│   └── config.yml          # shared AOIs / grid / dates / paths + per-source blocks
+├── data/
+│   ├── ECOSTRESS/           # raw/ (cached COGs) + aligned/ (per-overpass NetCDF)
+│   ├── LANDSAT/
+│   ├── TRAINING/
+│   └── ...
+├── results/
+├── src/
+│   └── acquire_ecostress.py # Stage 1a: ECOSTRESS V3 SST acquisition
+├── requirements.txt
+└── README.md
+
 # Data sources
 
 ## ECOSTRESS
 The primary set of high resoluton thermal images comes from the ISS ECOSTRESS isntrument these are loaded through NASA earth acess API. These data are loaded for areas of interest defined in configs/congif.yaml and interpolated to a common grid with a defual of 100m resolution. The ecostress images also have land and cloud mask channels that are interpolated to the same grid 
 
-The data is loaded by the 
+The data is loaded by the `acquire_ecostress.py` file for the date ranges and areas of intersted listed in config.yml.
+
+## Landsat 
+
+## MUR SST
+
+## IOOS Bouy data 

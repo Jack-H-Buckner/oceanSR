@@ -10,7 +10,10 @@
 
 project:
   name: OCEANSR
-  root: "."                 # project root; paths below resolve relative to it
+  root: "."  # project root; paths below resolve relative to it
+  gee_project: "high-res-sst"               
+  gee_service_account: "oceansr-ee@high-res-sst.iam.gserviceaccount.com"
+  gee_key_file: "high-res-sst-ee-key.json"
 
 paths:
   data: data
@@ -29,8 +32,8 @@ earthdata:
 
 # --- Shared across ALL data streams -----------------------------------------
 time:
-  start_date: "2023-08-01"   # inclusive (UTC)
-  end_date:   "2023-08-31"   # inclusive (UTC)
+  start_date: "2023-01-01"   # inclusive (UTC)
+  end_date:   "2023-12-31"   # inclusive (UTC)
 
 grid:
   resolution_m: 100          # target posting in metres
@@ -43,29 +46,72 @@ grid:
 # AOIs are defined ONCE here and reused by every source.
 # Each: id, name, geometry (bbox [W,S,E,N] in lon/lat OR geojson path), buffer_m.
 aois:
-  - id: hood_canal
-    name: "Hood Canal, WA"
-    bbox: [-123.15, 47.35, -122.85, 47.75]
-    buffer_m: 2000
-  # - id: glacier_bay
-  #   name: "Glacier Bay, AK"
-  #   # geometry: configs/aois/glacier_bay.geojson   # alternative to bbox
-  #   bbox: [-136.55, 58.40, -135.75, 59.10]
-  #   buffer_m: 2000
+  # ---- Pacific NW estuaries (OR/WA outer coast) --------------------------
+  - {id: tillamook_bay,       name: "Tillamook Bay, OR",        region: "PNW Estuaries", buffer_m: 2000, bbox: [-123.98, 45.45, -123.83, 45.58]}
+  - {id: netarts_bay,         name: "Netarts Bay, OR",          region: "PNW Estuaries", buffer_m: 2000, bbox: [-123.97, 45.38, -123.90, 45.46]}
+  - {id: yaquina_bay,         name: "Yaquina Bay, OR",          region: "PNW Estuaries", buffer_m: 2000, bbox: [-124.09, 44.55, -123.92, 44.66]}
+  - {id: coos_bay,            name: "Coos Bay, OR",             region: "PNW Estuaries", buffer_m: 2000, bbox: [-124.35, 43.28, -124.00, 43.50]}
+  - {id: grays_harbor,        name: "Grays Harbor, WA",         region: "PNW Estuaries", buffer_m: 2000, bbox: [-124.20, 46.84, -123.82, 47.02]}
+  - {id: willapa_bay,         name: "Willapa Bay, WA",          region: "PNW Estuaries", buffer_m: 2000, bbox: [-124.05, 46.38, -123.68, 46.78]}
+ 
+  # ---- Salish Sea / Puget Sound fjords (WA) ------------------------------
+  - {id: hood_canal,          name: "Hood Canal, WA",           region: "Salish Sea",    buffer_m: 2000, bbox: [-123.15, 47.35, -122.85, 47.75]}
+  - {id: central_puget_sound, name: "Central Puget Sound, WA",  region: "Salish Sea",    buffer_m: 2000, bbox: [-122.60, 47.50, -122.30, 47.80]}
+  - {id: south_puget_sound,   name: "South Puget Sound, WA",    region: "Salish Sea",    buffer_m: 2000, bbox: [-122.95, 47.10, -122.55, 47.32]}
+  - {id: padilla_bay,         name: "Padilla Bay, WA",          region: "Salish Sea",    buffer_m: 2000, bbox: [-122.58, 48.45, -122.40, 48.62]}
+  - {id: bellingham_bay,      name: "Bellingham Bay, WA",       region: "Salish Sea",    buffer_m: 2000, bbox: [-122.58, 48.62, -122.40, 48.78]}
+ 
+  # ---- SE Alaska fjords (>53N: Landsat/VIIRS only, no ECOSTRESS) ----------
+  - {id: glacier_bay,         name: "Glacier Bay, AK",          region: "SE Alaska",     buffer_m: 2000, bbox: [-136.55, 58.40, -135.75, 59.10]}
+  - {id: lynn_canal,          name: "Lynn Canal, AK",           region: "SE Alaska",     buffer_m: 2000, bbox: [-135.45, 58.35, -134.95, 59.05]}
+  - {id: sitka_sound,         name: "Sitka Sound, AK",          region: "SE Alaska",     buffer_m: 2000, bbox: [-135.62, 56.95, -135.18, 57.20]}
+  - {id: tracy_arm,           name: "Tracy Arm, AK",            region: "SE Alaska",     buffer_m: 2000, bbox: [-133.95, 57.75, -133.40, 58.05]}
+  - {id: behm_canal,          name: "Behm Canal (Ketchikan), AK", region: "SE Alaska",   buffer_m: 2000, bbox: [-131.95, 55.30, -131.40, 55.80]}
+ 
+  # ---- Chesapeake Bay (MD/VA) --------------------------------------------
+  - {id: upper_chesapeake,    name: "Upper Chesapeake Bay, MD", region: "Chesapeake",    buffer_m: 2000, bbox: [-76.45, 38.95, -76.05, 39.40]}
+  - {id: mid_chesapeake,      name: "Mid Chesapeake Bay",       region: "Chesapeake",    buffer_m: 2000, bbox: [-76.45, 37.90, -75.95, 38.45]}
+  - {id: lower_chesapeake,    name: "Lower Chesapeake Bay, VA", region: "Chesapeake",    buffer_m: 2000, bbox: [-76.45, 36.95, -75.95, 37.45]}
+  - {id: tangier_sound,       name: "Tangier Sound, MD/VA",     region: "Chesapeake",    buffer_m: 2000, bbox: [-76.10, 37.80, -75.75, 38.15]}
+ 
+  # ---- Carolina sounds & barrier islands (NC/SC) -------------------------
+  - {id: albemarle_sound,     name: "Albemarle Sound, NC",      region: "Carolinas",     buffer_m: 2000, bbox: [-76.70, 35.85, -75.85, 36.18]}
+  - {id: pamlico_sound,       name: "Pamlico Sound, NC",        region: "Carolinas",     buffer_m: 2000, bbox: [-76.55, 34.95, -75.45, 35.55]}
+  - {id: cape_fear_estuary,   name: "Cape Fear Estuary, NC",    region: "Carolinas",     buffer_m: 2000, bbox: [-78.05, 33.85, -77.85, 34.22]}
+  - {id: winyah_bay,          name: "Winyah Bay, SC",           region: "Carolinas",     buffer_m: 2000, bbox: [-79.32, 33.15, -79.08, 33.42]}
+  - {id: charleston_harbor,   name: "Charleston Harbor, SC",    region: "Carolinas",     buffer_m: 2000, bbox: [-79.98, 32.58, -79.58, 32.88]}
+ 
+  # ---- New England coast / fjards / islands (ME/RI/MA) -------------------
+  - {id: somes_sound,         name: "Somes Sound (MDI), ME",    region: "New England",   buffer_m: 2000, bbox: [-68.40, 44.20, -68.15, 44.45]}
+  - {id: penobscot_bay,       name: "Penobscot Bay, ME",        region: "New England",   buffer_m: 2000, bbox: [-69.20, 43.98, -68.68, 44.45]}
+  - {id: casco_bay,           name: "Casco Bay, ME",            region: "New England",   buffer_m: 2000, bbox: [-70.32, 43.52, -69.92, 43.85]}
+  - {id: narragansett_bay,    name: "Narragansett Bay, RI",     region: "New England",   buffer_m: 2000, bbox: [-71.45, 41.42, -71.15, 41.78]}
+  - {id: buzzards_bay,        name: "Buzzards Bay, MA",         region: "New England",   buffer_m: 2000, bbox: [-71.00, 41.45, -70.55, 41.72]}
 
 # --- Per-source settings -----------------------------------------------------
 sources:
   ecostress:
     short_name: ECO_L2T_LSTE
-    version: "003"            # V3 = first version with the SST layer
+    version: "002"            # V3 = first version with the SST layer
     layers:                   # role -> COG asset suffix (..._<suffix>.tif)
-      sst: SST                # sea-surface temperature (Kelvin), water-only
+      sst: LST                # sea-surface temperature (Kelvin), water-only
       lst: LST                # land-surface temperature (Kelvin), backup
       cloud: cloud            # binary cloud mask (1 = cloud)
       water: water            # binary water mask (1 = water, 0 = land)
       quality: QC             # bit-packed quality flags
     categorical: [cloud, water, quality]   # nearest-neighbour on reprojection
     output_format: netcdf     # netcdf | geotiff
+    overwrite: false
+  landsat:
+    # Surface Temperature from Landsat Collection 2, Tier 1, Level 2 (via GEE).
+    # ST over water ~= skin SST; Landsat carries its OWN cloud/water masks
+    # (QA_PIXEL + NDWI) since it rarely has a coincident ECOSTRESS scene.
+    platforms: [LANDSAT_8, LANDSAT_9]    # configurable; LANDSAT_7 / LANDSAT_5 also supported
+    cloud_cover_max: 0.7                  # scene-level CLOUD_COVER prefilter (fraction, 0-1)
+    masking:
+      ndwi_threshold: 0.0                # water where NDWI >= this (coastal: ~0.0)
+      cloud_buffer_km: 1.0               # also flag pixels within this distance of cloud (ST_CDIST)
+    output_format: netcdf                # netcdf | geotiff
     overwrite: false
     # Optional per-source overrides of the shared blocks:
     # time: {start_date: "2023-07-01", end_date: "2023-07-31"}
