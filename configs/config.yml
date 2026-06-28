@@ -18,10 +18,12 @@ project:
 paths:
   data: data
   results: results
-  # data sub-directory per source (under paths.data)
   ecostress: ECOSTRESS
   landsat: LANDSAT
+  tides: TIDE
   mur: MUR
+  met: MET            # <- add this
+  bathymetry: BATHYMETRY   # <- and this, for the bathymetry stage
   training: TRAINING
 
 earthdata:
@@ -120,3 +122,70 @@ sources:
   # Placeholders for later stages (not yet implemented):
   # landsat: { short_name: ..., version: ..., layers: {...} }
   # mur:     { short_name: "MUR-JPL-L4-GLOB-v4.1", ... }
+  mur:
+    # GHRSST MUR L4, 0.01 deg (~1 km), daily, gap-free -> the SST backbone.
+    short_name: "MUR-JPL-L4-GLOB-v4.1"
+    variable: analysed_sst       # Kelvin (scaled in-file; xarray unscales)
+    pad_deg: 0.05                # lat/lon padding around the AOI before reprojecting
+    output_format: netcdf        # netcdf | geotiff
+    overwrite: false
+  met:
+    # NOAA HRRR 3 km surface fields via Herbie. CONUS uses 'hrrr'; AOIs above
+    # ~50N use the separate Alaska domain 'hrrrak' (auto-selected by latitude).
+    model: auto                  # auto | hrrr | hrrrak
+    product: sfc                 # 2D surface fields
+    fxx: 0                       # forecast hour (0 = analysis; use 1 if DSWRF is 0 at f00)
+    variables: [airtemp, wind, swrad]   # airtemp->TMP:2m, wind->10m u/v, swrad->DSWRF:surface
+    daily_mean_hours: [0, 6, 12, 18]    # UTC hours averaged for the daily field (valid for both domains)
+    overpass_from: [ecostress, landsat] # also snapshot forcing at these stages' overpass times
+    regrid_radius_m: 6000        # pyresample search radius when resampling HRRR -> AOI grid
+    output_format: netcdf        # netcdf | geotiff
+    overwrite: false
+  bathymetry:
+    # Static covariate. GMRT GridServer: global, variable resolution (~100 m near
+    # US coasts, GEBCO-filled offshore), one bbox request per AOI, no auth.
+    source: gmrt
+    layer: topo            # topo (GEBCO-filled) | topo-mask (NaN off-survey)
+    resolution: max        # low | med | high | max | <meters per pixel>
+    pad_deg: 0.02          # lat/lon padding around the AOI before reprojecting
+    output_format: netcdf  # netcdf | geotiff
+    overwrite: false
+  tides:
+    # NOAA CO-OPS Tides & Currents. Harmonic 'predictions' are gap-free and
+    # extend to any date -> a complete forcing channel. Tide is ~uniform over a
+    # small AOI, so this is a per-AOI 1D time series (broadcast by the assembler).
+    product: predictions     # predictions (astronomical) | water_level (observed, gappy)
+    datum: MSL               # MSL | MLLW | MHHW | NAVD ...
+    interval: h              # h = hourly (predictions); also 6/10/15/30/60 | hilo
+    units: metric            # metric (m) | english (ft)
+    output_format: netcdf
+    overwrite: false
+    chunk_days: 2
+    # Per-AOI override: add `tide_station: "9447130"` to an AOI to pin a gauge;
+    # otherwise the nearest CO-OPS water-level station to the AOI centroid is used.
+ 
+
+model:
+  base_width: 48
+  depth: 3              # number of downsampling levels
+  t_window: 16          # days per sample
+  tile_size: 128
+
+train:
+  batch_size: 12
+  lr: 3.0e-4
+  epochs: 100
+  mask_mode_mix: {interior: 0.8, last: 0.2}   # interpolation vs nowcasting
+  val_aois: [padilla_bay, winyah_bay]         # held out for validation
+  amp: bf16
+  ckpt_dir: results/checkpoints
+
+assembler:
+  chunks: {time: 64, y: 128, x: 128}   # Zarr chunking (tune to tile size + RAM)
+  tile_size: 128                       # training tile side (pixels)
+  tile_stride: 128                     # tile origin stride (== size -> non-overlapping)
+  min_water_frac: 0.05                 # keep tiles with at least this water fraction
+  mur_cloud_threshold_k: 5.0           # drop high-res pixels colder than MUR by > this many K
+                                       # (cloud-cold contamination); 0 disables
+  overwrite: true
+  fill_mur_water: true                 # nearest-neighbour fill of MUR over water pixels
