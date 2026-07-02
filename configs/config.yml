@@ -135,21 +135,29 @@ sources:
     model: auto                  # auto | hrrr | hrrrak
     product: sfc                 # 2D surface fields
     fxx: 0                       # forecast hour (0 = analysis; use 1 if DSWRF is 0 at f00)
-    variables: [airtemp, wind, swrad]   # airtemp->TMP:2m, wind->10m u/v, swrad->DSWRF:surface
+    variables: [airtemp, wind, swrad,cloud]   # airtemp->TMP:2m, wind->10m u/v, swrad->DSWRF:surface
     daily_mean_hours: [0, 6, 12, 18]    # UTC hours averaged for the daily field (valid for both domains)
     overpass_from: [ecostress, landsat] # also snapshot forcing at these stages' overpass times
     regrid_radius_m: 6000        # pyresample search radius when resampling HRRR -> AOI grid
     output_format: netcdf        # netcdf | geotiff
-    overwrite: false
+    overwrite: true
+
   bathymetry:
-    # Static covariate. GMRT GridServer: global, variable resolution (~100 m near
-    # US coasts, GEBCO-filled offshore), one bbox request per AOI, no auth.
-    source: gmrt
-    layer: topo            # topo (GEBCO-filled) | topo-mask (NaN off-survey)
-    resolution: max        # low | med | high | max | <meters per pixel>
-    pad_deg: 0.02          # lat/lon padding around the AOI before reprojecting
-    output_format: netcdf  # netcdf | geotiff
-    overwrite: false
+    # Static covariate. source: cudem = NOAA NCEI CUDEM 1/9" (~3 m seamless
+    # topobathy) read from its /vsicurl VRT, aggregated to per-cell depth stats;
+    # falls back to GMRT where CUDEM has no coverage. source: gmrt = GMRT only.
+    source: cudem
+    cudem_urllist: "https://coast.noaa.gov/htdata/raster2/elevation/NCEI_ninth_Topobathy_2014_8483/urllist8483.txt"
+    cudem_index_cache: null      # -> data/BATHYMETRY/urllist_cudem.txt (cached once)
+    stats_subgrid_m: 10          # also selects the COG overview level
+    min_cudem_cover: 0.5
+    # GMRT fallback settings (also used when source: gmrt):
+    layer: topo                  # topo (GEBCO-filled) | topo-mask (NaN off-survey)
+    resolution: max              # low | med | high | max | <meters per pixel>
+    pad_deg: 0.02                # lat/lon padding around the AOI before reprojecting
+    output_format: netcdf        # netcdf | geotiff
+    overwrite: true
+
   tides:
     # NOAA CO-OPS Tides & Currents. Harmonic 'predictions' are gap-free and
     # extend to any date -> a complete forcing channel. Tide is ~uniform over a
@@ -163,29 +171,53 @@ sources:
     chunk_days: 2
     # Per-AOI override: add `tide_station: "9447130"` to an AOI to pin a gauge;
     # otherwise the nearest CO-OPS water-level station to the AOI centroid is used.
- 
+  landcover:
+    # Static land/water classification via Google Earth Engine (ESA WorldCover 10 m).
+    # Used as an authoritative LAND override so diked/reclaimed farmland (negative
+    # elevation but not water) is forced to land. acquire_landcover.py.
+    asset: ESA/WorldCover/v200   # v200=2021, v100=2020
+    band: Map
+    water_classes: [80]          # WorldCover legend: 80=water (add 90=wetland, 95=mangrove
+                                 # if you want those counted as water near tidal flats)
+    overwrite: false
 
 model:
   base_width: 48
   depth: 3              # number of downsampling levels
   t_window: 16          # days per sample
-  tile_size: 128
+  tile_size: 96
+  use_depth_percentiles: false 
 
 train:
   batch_size: 12
   lr: 3.0e-4
   epochs: 100
-  mask_mode_mix: {interior: 0.8, last: 0.2}   # interpolation vs nowcasting
-  val_aois: [padilla_bay, winyah_bay]         # held out for validation
+  mask_mode_mix: {interior: 1.0, last: 0.0}   # interpolation vs nowcasting 
+  val_aois: [padilla_bay, willapa_bay,tangier_sound,winyah_bay,somes_sound]         # held out for validation
   amp: bf16
   ckpt_dir: results/checkpoints
-
+  valid_from_sst: true        # ignore the (broken) stored eco_valid
+  derived_mur_filter: true    # but still apply the MUR cold filter on the derived mas
+  select_max_cloud_cover_pct: 20
+  select_min_finite_frac_eco: 0.25   # ECOSTRESS: eco_finite (presence) over water
+  select_min_valid_frac_lst:  0.25   # Landsat:   lst valid mask over water
+  cloud_loss_threshold_pct: 30          # still active (per-pixel)
+  loss_pixel_filters:
+    - {channel: lst_cloud,     op: "==", value: 0}     # drop Landsat-cloud pixels (lst only)
+    - {channel: lst_clouddist, op: ">=", value: 0.4}   # >=~1200 m from a Landsat cloud (lst only)
+    - {channel: eco_finite,    op: "==", value: 1}     # require an ECOSTRESS obs (eco only)
+    - {channel: eco_gapdist,   op: ">=", value: 0.4}   # >=~1200 m inside eco coverage (eco only)
+    - {channel: landcover_water, op: "==", value: 1}
 assembler:
-  chunks: {time: 64, y: 128, x: 128}   # Zarr chunking (tune to tile size + RAM)
-  tile_size: 128                       # training tile side (pixels)
-  tile_stride: 128                     # tile origin stride (== size -> non-overlapping)
+  chunks: {time: 64, y: 96, x: 96}   # Zarr chunking (tune to tile size + RAM)
+  tile_size: 96                       # training tile side (pixels)
+  tile_stride: 48                     # tile origin stride (== size -> non-overlapping) using half tile size for spatial augmentation
   min_water_frac: 0.05                 # keep tiles with at least this water fraction
   mur_cloud_threshold_k: 5.0           # drop high-res pixels colder than MUR by > this many K
                                        # (cloud-cold contamination); 0 disables
   overwrite: true
   fill_mur_water: true                 # nearest-neighbour fill of MUR over water pixels
+  water_min_depth_m: 0.0 
+  log_depth: true 
+
+   

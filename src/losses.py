@@ -21,6 +21,10 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
+from data import CHANNELS
+
+_CLOUD_IDX = CHANNELS.index("cloud_cover")   # HRRR total cloud cover channel (0..1)
+
 
 def masked_huber(pred, target, mask, delta: float = 1.0):
     """Huber over pixels where mask>0.5. Returns (loss, n_valid)."""
@@ -31,13 +35,25 @@ def masked_huber(pred, target, mask, delta: float = 1.0):
     return F.huber_loss(pred[m], target[m], delta=delta, reduction="mean"), n
 
 
-def sst_masked_loss(pred, batch, model, delta: float = 1.0, tv_weight: float = 0.0):
-    """pred: (B,1,T,H,W). batch carries per-sensor target/mask (B,H,W) + target_pos."""
+def sst_masked_loss(pred, batch, model, delta: float = 1.0, tv_weight: float = 0.0,
+                    cloud_max: float | None = None):
+    """pred: (B,1,T,H,W). batch carries per-sensor target/mask (B,H,W) + target_pos.
+
+    cloud_max (0..1, fraction): if set, supervision is dropped at target-day pixels
+    whose HRRR total cloud cover exceeds it -- so the loss only sees clear-sky days."""
     B = pred.shape[0]
     dev = pred.device
     tp = batch["target_pos"].to(dev).long()
     # prediction at each sample's masked day -> (B,H,W)
     pred_day = pred[torch.arange(B, device=dev), 0, tp]
+
+    # cloud gate from the (unblanked) HRRR cloud-cover channel at the target day
+    cloud_ok = None
+    if cloud_max is not None and "x" in batch:
+        xb = batch["x"]                                   # may be on CPU (not moved to GPU)
+        cloud_day = xb[torch.arange(B, device=xb.device), _CLOUD_IDX,
+                       tp.to(xb.device)].to(dev)
+        cloud_ok = (cloud_day <= cloud_max).float()      # (B,H,W) 1 where clear enough
 
     total = pred.sum() * 0.0
     metrics = {}
@@ -46,6 +62,8 @@ def sst_masked_loss(pred, batch, model, delta: float = 1.0, tv_weight: float = 0
                           ("lst", "lst_target", "lst_mask")):
         tgt = batch[tkey].to(dev)
         msk = batch[mkey].to(dev)
+        if cloud_ok is not None:
+            msk = msk * cloud_ok                          # keep only clear-sky supervision
         b = model.sensor_offset(s)                 # 0.0 (anchor) or Parameter(1,)
         adj = pred_day + b
         loss_s, n = masked_huber(adj, tgt, msk, delta)

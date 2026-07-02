@@ -164,8 +164,11 @@ def search_granules(ds_cfg: dict, bbox, start: str, end: str):
 
 
 def granule_name(granule) -> str:
+    """Clean granule id (strips the trailing _<LAYER>.tif), e.g.
+    ECOv002_L2T_LSTE_25520_009_10UEU_20230105T123623_0710_01."""
     try:
-        return granule.data_links()[0].split("/")[-1]
+        fn = granule.data_links()[0].split("/")[-1]
+        return re.sub(r"_[A-Za-z0-9]+\.tif$", "", fn)
     except Exception:
         return "<granule>"
 
@@ -173,14 +176,16 @@ def granule_name(granule) -> str:
 def filter_links_for_granule(granule, layers: dict) -> dict:
     """{role: url} for the COG assets we want from one granule."""
     links = granule.data_links()
-    out = {}
+    out, missing = {}, []
     for role, suffix in layers.items():
-        tail = f"_{suffix}.tif"
-        match = next((u for u in links if u.endswith(tail)), None)
+        match = next((u for u in links if u.endswith(f"_{suffix}.tif")), None)
         if match:
             out[role] = match
-        elif role == "sst":
-            log.warning("    SST asset not found in %s", granule_name(granule))
+        else:
+            missing.append(f"{role} (_{suffix}.tif)")
+    if missing:
+        log.warning("    %s: requested layer(s) not in granule: %s",
+                    granule_name(granule), ", ".join(missing))
     return out
 
 
@@ -294,9 +299,11 @@ def run(eff: dict, only_aoi, dry_run, list_layers):
 
     aois = eff["aois"]
     if only_aoi:
-        aois = [a for a in aois if a["id"] == only_aoi]
-        if not aois:
-            raise SystemExit(f"AOI '{only_aoi}' not found in config.")
+        req = set(only_aoi)
+        aois = [a for a in aois if a["id"] in req]
+        missing = req - {a["id"] for a in aois}
+        if missing:
+            raise SystemExit(f"AOI(s) not found in config: {sorted(missing)}")
 
     for aoi in aois:
         aoi_id = aoi["id"]
@@ -359,7 +366,9 @@ def main():
     ap = argparse.ArgumentParser(description="OCEANSR ECOSTRESS V3 SST acquisition.")
     ap.add_argument("--config", required=True, help="Path to configs/config.yaml.")
     ap.add_argument("--source", default=SOURCE, help="Source key under 'sources' (default: ecostress).")
-    ap.add_argument("--aoi", help="Process only this AOI id.")
+    ap.add_argument("--aoi", nargs="+", help="Process only these AOI id(s), space-separated.")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="re-download/re-process overpasses even if the aligned file exists")
     ap.add_argument("--dry-run", action="store_true", help="Search only; no download.")
     ap.add_argument("--list-layers", action="store_true",
                     help="Print available COG suffixes for the first granule and exit.")
@@ -376,6 +385,8 @@ def main():
     os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif")
 
     cfg = load_config(args.config)
+    if args.overwrite:
+        cfg.setdefault("sources", {}).setdefault(args.source, {})["overwrite"] = True
     eff = build_effective(cfg, args.source)
     run(eff, args.aoi, args.dry_run, args.list_layers)
 

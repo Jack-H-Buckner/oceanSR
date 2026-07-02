@@ -53,6 +53,9 @@ VAR_SEARCH = {
     "airtemp": (r"TMP:2 m above ground", {"t2m": "airtemp"}),
     "wind":    (r":(U|V)GRD:10 m above ground", {"u10": "wind_u", "v10": "wind_v"}),
     "swrad":   (r"DSWRF:surface", {"dswrf": "swrad"}),
+    # total cloud cover, whole atmosphere (modeled, gap-free, %). HRRR also has
+    # LCDC/MCDC/HCDC (low/mid/high) if a vertical split is ever wanted.
+    "cloud":   (r"TCDC:entire atmosphere", {"tcc": "cloud_cover"}),
 }
 
 
@@ -166,9 +169,17 @@ def fetch_hrrr(model, dt, fxx, product, var_keys):
         ds = H.xarray(search, remove_grib=True)
         if isinstance(ds, list):
             ds = xr.merge(ds, compat="override")
+        matched = False
         for src, dst in rename.items():
             if src in ds:
                 fields[dst] = np.asarray(ds[src].values)
+                matched = True
+        # single-field searches (e.g. TCDC) can come back under a different
+        # cfgrib shortName -> fall back to the lone data variable.
+        if not matched and len(rename) == 1:
+            dvs = [v for v in ds.data_vars]
+            if len(dvs) == 1:
+                fields[next(iter(rename.values()))] = np.asarray(ds[dvs[0]].values)
         if lon2d is None and "longitude" in ds.coords:
             lon2d = np.asarray(ds.longitude.values)
             lat2d = np.asarray(ds.latitude.values)
@@ -204,6 +215,8 @@ def to_dataset(grids, coords, t, grid_cfg) -> xr.Dataset:
         ds["wind_speed"].attrs["units"] = "m s-1"
     if "swrad" in ds:
         ds["swrad"].attrs["units"] = "W m-2"
+    if "cloud_cover" in ds:
+        ds["cloud_cover"].attrs["units"] = "%"
     return ds.expand_dims(time=[pd.Timestamp(t)])
 
 
