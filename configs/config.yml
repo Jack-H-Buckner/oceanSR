@@ -10,15 +10,20 @@
 
 project:
   name: OCEANSR
-  root: "."                 # project root; paths below resolve relative to it
+  root: "."  # project root; paths below resolve relative to it
+  gee_project: "high-res-sst"               
+  gee_service_account: "oceansr-ee@high-res-sst.iam.gserviceaccount.com"
+  gee_key_file: "high-res-sst-ee-key.json"
 
 paths:
   data: data
   results: results
-  # data sub-directory per source (under paths.data)
   ecostress: ECOSTRESS
   landsat: LANDSAT
+  tides: TIDE
   mur: MUR
+  met: MET            # <- add this
+  bathymetry: BATHYMETRY   # <- and this, for the bathymetry stage
   training: TRAINING
 
 earthdata:
@@ -29,8 +34,8 @@ earthdata:
 
 # --- Shared across ALL data streams -----------------------------------------
 time:
-  start_date: "2023-08-01"   # inclusive (UTC)
-  end_date:   "2023-08-31"   # inclusive (UTC)
+  start_date: "2023-01-01"   # inclusive (UTC)
+  end_date:   "2023-12-31"   # inclusive (UTC)
 
 grid:
   resolution_m: 100          # target posting in metres
@@ -43,29 +48,72 @@ grid:
 # AOIs are defined ONCE here and reused by every source.
 # Each: id, name, geometry (bbox [W,S,E,N] in lon/lat OR geojson path), buffer_m.
 aois:
-  - id: hood_canal
-    name: "Hood Canal, WA"
-    bbox: [-123.15, 47.35, -122.85, 47.75]
-    buffer_m: 2000
-  # - id: glacier_bay
-  #   name: "Glacier Bay, AK"
-  #   # geometry: configs/aois/glacier_bay.geojson   # alternative to bbox
-  #   bbox: [-136.55, 58.40, -135.75, 59.10]
-  #   buffer_m: 2000
+  # ---- Pacific NW estuaries (OR/WA outer coast) --------------------------
+  - {id: tillamook_bay,       name: "Tillamook Bay, OR",        region: "PNW Estuaries", buffer_m: 2000, bbox: [-123.98, 45.45, -123.83, 45.58]}
+  - {id: netarts_bay,         name: "Netarts Bay, OR",          region: "PNW Estuaries", buffer_m: 2000, bbox: [-123.97, 45.38, -123.90, 45.46]}
+  - {id: yaquina_bay,         name: "Yaquina Bay, OR",          region: "PNW Estuaries", buffer_m: 2000, bbox: [-124.09, 44.55, -123.92, 44.66]}
+  - {id: coos_bay,            name: "Coos Bay, OR",             region: "PNW Estuaries", buffer_m: 2000, bbox: [-124.35, 43.28, -124.00, 43.50]}
+  - {id: grays_harbor,        name: "Grays Harbor, WA",         region: "PNW Estuaries", buffer_m: 2000, bbox: [-124.20, 46.84, -123.82, 47.02]}
+  - {id: willapa_bay,         name: "Willapa Bay, WA",          region: "PNW Estuaries", buffer_m: 2000, bbox: [-124.05, 46.38, -123.68, 46.78]}
+ 
+  # ---- Salish Sea / Puget Sound fjords (WA) ------------------------------
+  - {id: hood_canal,          name: "Hood Canal, WA",           region: "Salish Sea",    buffer_m: 2000, bbox: [-123.15, 47.35, -122.85, 47.75]}
+  - {id: central_puget_sound, name: "Central Puget Sound, WA",  region: "Salish Sea",    buffer_m: 2000, bbox: [-122.60, 47.50, -122.30, 47.80]}
+  - {id: south_puget_sound,   name: "South Puget Sound, WA",    region: "Salish Sea",    buffer_m: 2000, bbox: [-122.95, 47.10, -122.55, 47.32]}
+  - {id: padilla_bay,         name: "Padilla Bay, WA",          region: "Salish Sea",    buffer_m: 2000, bbox: [-122.58, 48.45, -122.40, 48.62]}
+  - {id: bellingham_bay,      name: "Bellingham Bay, WA",       region: "Salish Sea",    buffer_m: 2000, bbox: [-122.58, 48.62, -122.40, 48.78]}
+ 
+  # ---- SE Alaska fjords (>53N: Landsat/VIIRS only, no ECOSTRESS) ----------
+  - {id: glacier_bay,         name: "Glacier Bay, AK",          region: "SE Alaska",     buffer_m: 2000, bbox: [-136.55, 58.40, -135.75, 59.10]}
+  - {id: lynn_canal,          name: "Lynn Canal, AK",           region: "SE Alaska",     buffer_m: 2000, bbox: [-135.45, 58.35, -134.95, 59.05]}
+  - {id: sitka_sound,         name: "Sitka Sound, AK",          region: "SE Alaska",     buffer_m: 2000, bbox: [-135.62, 56.95, -135.18, 57.20]}
+  - {id: tracy_arm,           name: "Tracy Arm, AK",            region: "SE Alaska",     buffer_m: 2000, bbox: [-133.95, 57.75, -133.40, 58.05]}
+  - {id: behm_canal,          name: "Behm Canal (Ketchikan), AK", region: "SE Alaska",   buffer_m: 2000, bbox: [-131.95, 55.30, -131.40, 55.80]}
+ 
+  # ---- Chesapeake Bay (MD/VA) --------------------------------------------
+  - {id: upper_chesapeake,    name: "Upper Chesapeake Bay, MD", region: "Chesapeake",    buffer_m: 2000, bbox: [-76.45, 38.95, -76.05, 39.40]}
+  - {id: mid_chesapeake,      name: "Mid Chesapeake Bay",       region: "Chesapeake",    buffer_m: 2000, bbox: [-76.45, 37.90, -75.95, 38.45]}
+  - {id: lower_chesapeake,    name: "Lower Chesapeake Bay, VA", region: "Chesapeake",    buffer_m: 2000, bbox: [-76.45, 36.95, -75.95, 37.45]}
+  - {id: tangier_sound,       name: "Tangier Sound, MD/VA",     region: "Chesapeake",    buffer_m: 2000, bbox: [-76.10, 37.80, -75.75, 38.15]}
+ 
+  # ---- Carolina sounds & barrier islands (NC/SC) -------------------------
+  - {id: albemarle_sound,     name: "Albemarle Sound, NC",      region: "Carolinas",     buffer_m: 2000, bbox: [-76.70, 35.85, -75.85, 36.18]}
+  - {id: pamlico_sound,       name: "Pamlico Sound, NC",        region: "Carolinas",     buffer_m: 2000, bbox: [-76.55, 34.95, -75.45, 35.55]}
+  - {id: cape_fear_estuary,   name: "Cape Fear Estuary, NC",    region: "Carolinas",     buffer_m: 2000, bbox: [-78.05, 33.85, -77.85, 34.22]}
+  - {id: winyah_bay,          name: "Winyah Bay, SC",           region: "Carolinas",     buffer_m: 2000, bbox: [-79.32, 33.15, -79.08, 33.42]}
+  - {id: charleston_harbor,   name: "Charleston Harbor, SC",    region: "Carolinas",     buffer_m: 2000, bbox: [-79.98, 32.58, -79.58, 32.88]}
+ 
+  # ---- New England coast / fjards / islands (ME/RI/MA) -------------------
+  - {id: somes_sound,         name: "Somes Sound (MDI), ME",    region: "New England",   buffer_m: 2000, bbox: [-68.40, 44.20, -68.15, 44.45]}
+  - {id: penobscot_bay,       name: "Penobscot Bay, ME",        region: "New England",   buffer_m: 2000, bbox: [-69.20, 43.98, -68.68, 44.45]}
+  - {id: casco_bay,           name: "Casco Bay, ME",            region: "New England",   buffer_m: 2000, bbox: [-70.32, 43.52, -69.92, 43.85]}
+  - {id: narragansett_bay,    name: "Narragansett Bay, RI",     region: "New England",   buffer_m: 2000, bbox: [-71.45, 41.42, -71.15, 41.78]}
+  - {id: buzzards_bay,        name: "Buzzards Bay, MA",         region: "New England",   buffer_m: 2000, bbox: [-71.00, 41.45, -70.55, 41.72]}
 
 # --- Per-source settings -----------------------------------------------------
 sources:
   ecostress:
     short_name: ECO_L2T_LSTE
-    version: "003"            # V3 = first version with the SST layer
+    version: "002"            # V3 = first version with the SST layer
     layers:                   # role -> COG asset suffix (..._<suffix>.tif)
-      sst: SST                # sea-surface temperature (Kelvin), water-only
+      sst: LST                # sea-surface temperature (Kelvin), water-only
       lst: LST                # land-surface temperature (Kelvin), backup
       cloud: cloud            # binary cloud mask (1 = cloud)
       water: water            # binary water mask (1 = water, 0 = land)
       quality: QC             # bit-packed quality flags
     categorical: [cloud, water, quality]   # nearest-neighbour on reprojection
     output_format: netcdf     # netcdf | geotiff
+    overwrite: false
+  landsat:
+    # Surface Temperature from Landsat Collection 2, Tier 1, Level 2 (via GEE).
+    # ST over water ~= skin SST; Landsat carries its OWN cloud/water masks
+    # (QA_PIXEL + NDWI) since it rarely has a coincident ECOSTRESS scene.
+    platforms: [LANDSAT_8, LANDSAT_9]    # configurable; LANDSAT_7 / LANDSAT_5 also supported
+    cloud_cover_max: 0.7                  # scene-level CLOUD_COVER prefilter (fraction, 0-1)
+    masking:
+      ndwi_threshold: 0.0                # water where NDWI >= this (coastal: ~0.0)
+      cloud_buffer_km: 1.0               # also flag pixels within this distance of cloud (ST_CDIST)
+    output_format: netcdf                # netcdf | geotiff
     overwrite: false
     # Optional per-source overrides of the shared blocks:
     # time: {start_date: "2023-07-01", end_date: "2023-07-31"}
@@ -74,3 +122,102 @@ sources:
   # Placeholders for later stages (not yet implemented):
   # landsat: { short_name: ..., version: ..., layers: {...} }
   # mur:     { short_name: "MUR-JPL-L4-GLOB-v4.1", ... }
+  mur:
+    # GHRSST MUR L4, 0.01 deg (~1 km), daily, gap-free -> the SST backbone.
+    short_name: "MUR-JPL-L4-GLOB-v4.1"
+    variable: analysed_sst       # Kelvin (scaled in-file; xarray unscales)
+    pad_deg: 0.05                # lat/lon padding around the AOI before reprojecting
+    output_format: netcdf        # netcdf | geotiff
+    overwrite: false
+  met:
+    # NOAA HRRR 3 km surface fields via Herbie. CONUS uses 'hrrr'; AOIs above
+    # ~50N use the separate Alaska domain 'hrrrak' (auto-selected by latitude).
+    model: auto                  # auto | hrrr | hrrrak
+    product: sfc                 # 2D surface fields
+    fxx: 0                       # forecast hour (0 = analysis; use 1 if DSWRF is 0 at f00)
+    variables: [airtemp, wind, swrad,cloud]   # airtemp->TMP:2m, wind->10m u/v, swrad->DSWRF:surface
+    daily_mean_hours: [0, 6, 12, 18]    # UTC hours averaged for the daily field (valid for both domains)
+    overpass_from: [ecostress, landsat] # also snapshot forcing at these stages' overpass times
+    regrid_radius_m: 6000        # pyresample search radius when resampling HRRR -> AOI grid
+    output_format: netcdf        # netcdf | geotiff
+    overwrite: true
+
+  bathymetry:
+    # Static covariate. source: cudem = NOAA NCEI CUDEM 1/9" (~3 m seamless
+    # topobathy) read from its /vsicurl VRT, aggregated to per-cell depth stats;
+    # falls back to GMRT where CUDEM has no coverage. source: gmrt = GMRT only.
+    source: cudem
+    cudem_urllist: "https://coast.noaa.gov/htdata/raster2/elevation/NCEI_ninth_Topobathy_2014_8483/urllist8483.txt"
+    cudem_index_cache: null      # -> data/BATHYMETRY/urllist_cudem.txt (cached once)
+    stats_subgrid_m: 10          # also selects the COG overview level
+    min_cudem_cover: 0.5
+    # GMRT fallback settings (also used when source: gmrt):
+    layer: topo                  # topo (GEBCO-filled) | topo-mask (NaN off-survey)
+    resolution: max              # low | med | high | max | <meters per pixel>
+    pad_deg: 0.02                # lat/lon padding around the AOI before reprojecting
+    output_format: netcdf        # netcdf | geotiff
+    overwrite: true
+
+  tides:
+    # NOAA CO-OPS Tides & Currents. Harmonic 'predictions' are gap-free and
+    # extend to any date -> a complete forcing channel. Tide is ~uniform over a
+    # small AOI, so this is a per-AOI 1D time series (broadcast by the assembler).
+    product: predictions     # predictions (astronomical) | water_level (observed, gappy)
+    datum: MSL               # MSL | MLLW | MHHW | NAVD ...
+    interval: h              # h = hourly (predictions); also 6/10/15/30/60 | hilo
+    units: metric            # metric (m) | english (ft)
+    output_format: netcdf
+    overwrite: false
+    chunk_days: 2
+    # Per-AOI override: add `tide_station: "9447130"` to an AOI to pin a gauge;
+    # otherwise the nearest CO-OPS water-level station to the AOI centroid is used.
+  landcover:
+    # Static land/water classification via Google Earth Engine (ESA WorldCover 10 m).
+    # Used as an authoritative LAND override so diked/reclaimed farmland (negative
+    # elevation but not water) is forced to land. acquire_landcover.py.
+    asset: ESA/WorldCover/v200   # v200=2021, v100=2020
+    band: Map
+    water_classes: [80]          # WorldCover legend: 80=water (add 90=wetland, 95=mangrove
+                                 # if you want those counted as water near tidal flats)
+    overwrite: false
+
+model:
+  base_width: 48
+  depth: 3              # number of downsampling levels
+  t_window: 16          # days per sample
+  tile_size: 96
+  use_depth_percentiles: false 
+
+train:
+  batch_size: 12
+  lr: 3.0e-4
+  epochs: 100
+  mask_mode_mix: {interior: 1.0, last: 0.0}   # interpolation vs nowcasting 
+  val_aois: [padilla_bay, willapa_bay,tangier_sound,winyah_bay,somes_sound]         # held out for validation
+  amp: bf16
+  ckpt_dir: results/checkpoints
+  valid_from_sst: true        # ignore the (broken) stored eco_valid
+  derived_mur_filter: true    # but still apply the MUR cold filter on the derived mas
+  select_max_cloud_cover_pct: 20
+  select_min_finite_frac_eco: 0.25   # ECOSTRESS: eco_finite (presence) over water
+  select_min_valid_frac_lst:  0.25   # Landsat:   lst valid mask over water
+  cloud_loss_threshold_pct: 30          # still active (per-pixel)
+  loss_pixel_filters:
+    - {channel: lst_cloud,     op: "==", value: 0}     # drop Landsat-cloud pixels (lst only)
+    - {channel: lst_clouddist, op: ">=", value: 0.4}   # >=~1200 m from a Landsat cloud (lst only)
+    - {channel: eco_finite,    op: "==", value: 1}     # require an ECOSTRESS obs (eco only)
+    - {channel: eco_gapdist,   op: ">=", value: 0.4}   # >=~1200 m inside eco coverage (eco only)
+    - {channel: landcover_water, op: "==", value: 1}
+assembler:
+  chunks: {time: 64, y: 96, x: 96}   # Zarr chunking (tune to tile size + RAM)
+  tile_size: 96                       # training tile side (pixels)
+  tile_stride: 48                     # tile origin stride (== size -> non-overlapping) using half tile size for spatial augmentation
+  min_water_frac: 0.05                 # keep tiles with at least this water fraction
+  mur_cloud_threshold_k: 5.0           # drop high-res pixels colder than MUR by > this many K
+                                       # (cloud-cold contamination); 0 disables
+  overwrite: true
+  fill_mur_water: true                 # nearest-neighbour fill of MUR over water pixels
+  water_min_depth_m: 0.0 
+  log_depth: true 
+
+   

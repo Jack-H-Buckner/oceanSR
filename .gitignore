@@ -15,3 +15,4 @@ results/
 # Credentials — never commit
 .netrc
 *.env
+*.json
